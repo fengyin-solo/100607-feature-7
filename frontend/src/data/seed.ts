@@ -1,7 +1,133 @@
-import type { EntryRow } from './types'
+import type { EntryRow, OccupancyDoc } from './types'
 
 // 示例数据：首次打开时播种，之后浏览器里的改动优先，重置才会回到这份。
-export const SEED_ROWS: Record<string, EntryRow[]> = {
+// 机位占用按「当天」生成，换一天打开演示也能在时间轴上看到当天排班。
+const now = new Date()
+const pad = (value: number) => String(value).padStart(2, '0')
+const TODAY = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+const at = (hhmm: string) => `${TODAY} ${hhmm}`
+
+const hm = (text: string) => {
+  const [hour, minute] = text.split(':').map(Number)
+  return hour * 60 + minute
+}
+
+type SeedShape = {
+  flight: EntryRow[]
+  stand: EntryRow[]
+  standOccupancy: OccupancyDoc[]
+  bridge: EntryRow[]
+  shuttle: EntryRow[]
+  baggage: EntryRow[]
+  line: EntryRow[]
+  fueling: EntryRow[]
+  deice: EntryRow[]
+  gpu: EntryRow[]
+  tow: EntryRow[]
+  catering: EntryRow[]
+  cabin: EntryRow[]
+  team: EntryRow[]
+  vehmaint: EntryRow[]
+  vip: EntryRow[]
+  delay: EntryRow[]
+  apron: EntryRow[]
+  resplan: EntryRow[]
+}
+
+let occSeq = 0
+const perStandSeq = new Map<number, number>()
+function occ(
+  standId: number,
+  range: [string, string],
+  flight: string,
+  model: string,
+  level: OccupancyDoc['保障等级'],
+): OccupancyDoc {
+  const seq = (perStandSeq.get(standId) ?? 0) + 1
+  perStandSeq.set(standId, seq)
+  occSeq += 1
+  return {
+    id: `OCC-${standId}-${seq}`,
+    standId,
+    date: TODAY,
+    startMin: hm(range[0]),
+    endMin: hm(range[1]),
+    航班号: flight,
+    机型: model,
+    保障等级: level,
+    createdAt: Date.now() + occSeq,
+  }
+}
+
+// 机位主表只登记机位自身属性；当天被谁占、占哪几段，全部在 standOccupancy 里。
+const STAND_SEED: EntryRow[] = [
+  { id: 1, status: '空闲', pending: true, abnormal: false, 机位编号: '101', 机位类型: '窄体机位', 适用机型: 'A319/A320/A321/B737/B738', 廊桥配置: '有廊桥', 近远机位: '近机位' },
+  { id: 2, status: '空闲', pending: true, abnormal: false, 机位编号: '102', 机位类型: '窄体机位', 适用机型: 'A319/A320/A321/B737/B738/B739', 廊桥配置: '有廊桥', 近远机位: '近机位' },
+  { id: 3, status: '空闲', pending: true, abnormal: false, 机位编号: '103', 机位类型: '窄体机位', 适用机型: 'A320/A321/B738/ARJ21', 廊桥配置: '无廊桥', 近远机位: '远机位' },
+  { id: 4, status: '空闲', pending: true, abnormal: false, 机位编号: '104', 机位类型: '窄体机位', 适用机型: 'A319/A320/B738/ARJ21/E190', 廊桥配置: '无廊桥', 近远机位: '远机位' },
+  { id: 5, status: '空闲', pending: true, abnormal: false, 机位编号: '201', 机位类型: '宽体机位', 适用机型: 'B777/B787/A330/A350', 廊桥配置: '有廊桥', 近远机位: '近机位' },
+  { id: 6, status: '空闲', pending: true, abnormal: false, 机位编号: '202', 机位类型: '宽体机位', 适用机型: 'B767/B777/B787/A330', 廊桥配置: '有廊桥', 近远机位: '近机位' },
+  { id: 7, status: '空闲', pending: true, abnormal: false, 机位编号: '203', 机位类型: '宽体机位', 适用机型: 'B747/B777/B787/A330/A350', 廊桥配置: '无廊桥', 近远机位: '远机位' },
+  { id: 8, status: '空闲', pending: true, abnormal: false, 机位编号: '301', 机位类型: '混合机位', 适用机型: 'A320/A321/A330/B738/B787', 廊桥配置: '有廊桥', 近远机位: '近机位' },
+  { id: 9, status: '维护中', pending: true, abnormal: false, 机位编号: '302', 机位类型: '混合机位', 适用机型: 'A320/A330/B738/B787', 廊桥配置: '无廊桥', 近远机位: '远机位' },
+  { id: 10, status: '已封闭', pending: false, abnormal: false, 机位编号: '401', 机位类型: '窄体机位', 适用机型: 'A319/A320/A321/B738', 廊桥配置: '有廊桥', 近远机位: '近机位' },
+]
+
+// 当天机位占用：廊桥机位的每一段占用都在廊桥待办里有对应靠接作业。
+const OCCUPANCY_SEED: OccupancyDoc[] = [
+  occ(1, ['08:30', '10:05'], 'CA1831', 'A320', '普通'),
+  occ(1, ['11:20', '12:40'], 'MU5102', 'A321', '重要'),
+  occ(2, ['09:10', '10:35'], 'CZ3101', 'B738', '普通'),
+  occ(2, ['14:00', '15:20'], 'CA1502', 'A320', '普通'),
+  occ(3, ['07:50', '08:50'], 'EU2231', 'ARJ21', '普通'),
+  occ(5, ['10:40', '13:10'], 'CA981', 'B777', '要客'),
+  occ(5, ['17:30', '19:45'], 'MU587', 'B787', '重要'),
+  occ(6, ['12:00', '14:20'], 'CZ327', 'B787', '普通'),
+  occ(8, ['06:40', '08:10'], 'HU7801', 'A330', '普通'),
+  occ(8, ['21:10', '22:20'], '9C8901', 'A320', '普通'),
+]
+
+function bridgeJob(
+  id: number,
+  bridgeNo: string,
+  standCode: string,
+  flight: string,
+  occupancyId: string,
+  dock: string,
+  release: string,
+  status = '待靠接',
+): EntryRow {
+  return {
+    id,
+    status,
+    pending: status !== '已撤离',
+    abnormal: false,
+    作业编号: `BRID-${String(id).padStart(4, '0')}`,
+    廊桥编号: bridgeNo,
+    对应机位: standCode,
+    航班号: flight,
+    关联占用: occupancyId,
+    靠桥时间: at(dock),
+    撤桥时间: at(release),
+    操作人员: '—',
+    对接检查项: status === '待靠接' ? '待检查' : '已检查',
+    作业状态: status,
+  }
+}
+
+const BRIDGE_SEED: EntryRow[] = [
+  bridgeJob(1, 'JB101', '101', 'CA1831', 'OCC-1-1', '08:25', '10:10'),
+  bridgeJob(2, 'JB101', '101', 'MU5102', 'OCC-1-2', '11:15', '12:45'),
+  bridgeJob(3, 'JB102', '102', 'CZ3101', 'OCC-2-1', '09:05', '10:40'),
+  bridgeJob(4, 'JB102', '102', 'CA1502', 'OCC-2-2', '13:55', '15:25'),
+  bridgeJob(5, 'JB201', '201', 'CA981', 'OCC-5-1', '10:35', '13:15'),
+  bridgeJob(6, 'JB201', '201', 'MU587', 'OCC-5-2', '17:25', '19:50'),
+  bridgeJob(7, 'JB202', '202', 'CZ327', 'OCC-6-1', '11:55', '14:25'),
+  bridgeJob(8, 'JB301', '301', 'HU7801', 'OCC-8-1', '06:35', '08:15', '已撤离'),
+  bridgeJob(9, 'JB301', '301', '9C8901', 'OCC-8-2', '21:05', '22:25'),
+]
+
+export const SEED_ROWS: SeedShape = {
   "flight": [
     {
       "id": 1,
@@ -46,94 +172,9 @@ export const SEED_ROWS: Record<string, EntryRow[]> = {
       "保障状态": "航班保障样例3"
     }
   ],
-  "stand": [
-    {
-      "id": 1,
-      "status": "空闲",
-      "pending": true,
-      "abnormal": false,
-      "机位编号": "STAN-0001",
-      "机位类型": "机位分配样例1",
-      "适用机型": "机位分配样例1",
-      "廊桥配置": "机位分配样例1",
-      "近远机位": "机位分配样例1",
-      "占用时段": "2026-09-01",
-      "当前航班": "机位分配样例1",
-      "机位状态": "机位分配样例1"
-    },
-    {
-      "id": 2,
-      "status": "占用中",
-      "pending": true,
-      "abnormal": true,
-      "机位编号": "STAN-0002",
-      "机位类型": "机位分配样例2",
-      "适用机型": "机位分配样例2",
-      "廊桥配置": "机位分配样例2",
-      "近远机位": "机位分配样例2",
-      "占用时段": "2026-09-02",
-      "当前航班": "机位分配样例2",
-      "机位状态": "机位分配样例2"
-    },
-    {
-      "id": 3,
-      "status": "维护中",
-      "pending": false,
-      "abnormal": false,
-      "机位编号": "STAN-0003",
-      "机位类型": "机位分配样例3",
-      "适用机型": "机位分配样例3",
-      "廊桥配置": "机位分配样例3",
-      "近远机位": "机位分配样例3",
-      "占用时段": "2026-09-03",
-      "当前航班": "机位分配样例3",
-      "机位状态": "机位分配样例3"
-    }
-  ],
-  "bridge": [
-    {
-      "id": 1,
-      "status": "待靠接",
-      "pending": true,
-      "abnormal": false,
-      "作业编号": "BRID-0001",
-      "廊桥编号": "BRID-0001",
-      "对应机位": "廊桥靠接样例1",
-      "靠桥时间": "2026-09-01",
-      "撤桥时间": "2026-09-01",
-      "操作人员": "廊桥靠接样例1",
-      "对接检查项": "廊桥靠接样例1",
-      "作业状态": "廊桥靠接样例1"
-    },
-    {
-      "id": 2,
-      "status": "已靠桥",
-      "pending": true,
-      "abnormal": true,
-      "作业编号": "BRID-0002",
-      "廊桥编号": "BRID-0002",
-      "对应机位": "廊桥靠接样例2",
-      "靠桥时间": "2026-09-02",
-      "撤桥时间": "2026-09-02",
-      "操作人员": "廊桥靠接样例2",
-      "对接检查项": "廊桥靠接样例2",
-      "作业状态": "廊桥靠接样例2"
-    },
-    {
-      "id": 3,
-      "status": "已撤离",
-      "pending": false,
-      "abnormal": false,
-      "作业编号": "BRID-0003",
-      "廊桥编号": "BRID-0003",
-      "对应机位": "廊桥靠接样例3",
-      "靠桥时间": "2026-09-03",
-      "撤桥时间": "2026-09-03",
-      "操作人员": "廊桥靠接样例3",
-      "对接检查项": "廊桥靠接样例3",
-      "作业状态": "廊桥靠接样例3"
-    }
-  ],
+  "stand": STAND_SEED,
+  "standOccupancy": OCCUPANCY_SEED,
+  "bridge": BRIDGE_SEED,
   "shuttle": [
     {
       "id": 1,
@@ -702,7 +743,7 @@ export const SEED_ROWS: Record<string, EntryRow[]> = {
       "影响旅客数": "延误处置样例3",
       "保障措施": "延误处置样例3",
       "处置负责人": "延误处置样例3",
-      "上报时间": "2026-09-03",
+      "上报时间": "2026-09-01",
       "处置状态": "延误处置样例3"
     }
   ],

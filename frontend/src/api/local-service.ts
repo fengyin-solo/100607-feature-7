@@ -85,7 +85,7 @@ export function downloadEntries(key: string): void {
 }
 
 export function loadOverview(): OverviewResult {
-  const rows = allRows()
+  const rows = allRows() as Record<string, EntryRow[]>
   const modules = [...MODULE_BY_KEY.values()].map((meta) => {
     const entries = rows[meta.key] ?? []
     return {

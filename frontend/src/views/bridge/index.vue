@@ -3,7 +3,9 @@
     <header class="page-head">
       <div>
         <h2>廊桥靠接管理</h2>
-        <p class="page-desc">维护廊桥作业，围绕作业编号、廊桥编号、对应机位、靠桥时间做登记、筛选与状态流转。</p>
+        <p class="page-desc">
+          待靠接待办由机位分配自动生成，作业编号、廊桥编号、对应机位与机位占用台账双向核对，两处必须对得上。
+        </p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记廊桥作业</button>
@@ -18,16 +20,27 @@
       </article>
     </div>
 
-    <p class="status-legend">
-      <span v-for="item in statusSummary" :key="item.status" class="legend-item">
-        {{ item.status }}：{{ item.count }}
-      </span>
-    </p>
+    <section class="todo-panel">
+      <h3 class="todo-title">待靠接待办（机位分配联动生成）</h3>
+      <ul v-if="pendingJobs.length" class="todo-list">
+        <li v-for="item in pendingJobs" :key="String(item.job.id)" class="todo-item">
+          <span class="todo-code">{{ item.job['作业编号'] }}</span>
+          <span>{{ item.job['航班号'] }}</span>
+          <span>廊桥 {{ item.job['廊桥编号'] }}</span>
+          <span>机位 {{ item.job['对应机位'] }}</span>
+          <span>{{ item.job['靠桥时间'] }}</span>
+          <span class="consistency" :class="item.consistent ? 'ok' : 'bad'" :title="item.reason">
+            {{ item.consistent ? '机位核对一致' : `对不上：${item.reason}` }}
+          </span>
+        </li>
+      </ul>
+      <p v-else class="empty-block">暂无待靠接作业</p>
+    </section>
 
     <form class="filter-bar" @submit.prevent="reload">
-      <label v-for="field in filterFields" :key="field" class="filter-item">
-        <span>{{ field }}</span>
-        <input v-model="filters[field]" :placeholder="`按${field}检索`" />
+      <label class="filter-item">
+        <span>对应机位</span>
+        <input v-model="standFilter" placeholder="按机位编号检索" />
       </label>
       <button class="btn" type="submit">查询</button>
       <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
@@ -37,34 +50,40 @@
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th>机位核对</th>
           <th>当前状态</th>
           <th>可执行动作</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="String(row.id)">
-          <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
-          <td>{{ row.status }}</td>
+        <tr v-for="item in checks" :key="String(item.job.id)">
+          <td v-for="column in columns" :key="column">{{ item.job[column] ?? '—' }}</td>
+          <td>
+            <span class="consistency" :class="item.consistent ? 'ok' : 'bad'" :title="item.reason">
+              {{ item.consistent ? '一致' : '不一致' }}
+            </span>
+          </td>
+          <td>{{ item.job.status }}</td>
           <td class="row-actions">
             <button
               v-for="action in actions"
               :key="action"
               class="link"
               type="button"
-              @click="runAction(action, row)"
+              @click="runAction(action, item.job)"
             >
               {{ action }}
             </button>
           </td>
         </tr>
-        <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无廊桥靠接数据，可先登记廊桥作业</td>
+        <tr v-if="!checks.length">
+          <td :colspan="columns.length + 3" class="empty-state">暂无廊桥靠接数据</td>
         </tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条廊桥靠接记录</span>
+      <span>共 {{ checks.length }} 条廊桥作业；机位被更高保障等级航班让位时，对应待办会同步撤回</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -75,32 +94,30 @@ import { computed, onMounted, ref } from 'vue'
 
 import {
   downloadEntries,
-  listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
+import { listBridgeChecks } from '@/domain/stand'
+import type { BridgeCheck } from '@/domain/stand'
 
 const meta = moduleMeta('bridge')
-const columns = ["作业编号", "廊桥编号", "对应机位", "靠桥时间", "撤桥时间", "操作人员", "对接检查项", "作业状态"]
+const columns = ["作业编号", "航班号", "廊桥编号", "对应机位", "靠桥时间", "撤桥时间", "操作人员", "对接检查项", "作业状态"]
 const actions = ["开始靠接", "确认撤离", "登记中止"]
-const statuses = ["待靠接", "已靠桥", "已撤离", "异常中止"]
-const stats = [{"label": "今日靠接作业", "value": 0}, {"label": "待靠桥作业", "value": 0}, {"label": "异常中止作业", "value": 0}]
+const stats = computed(() => [
+  { label: '今日靠接作业', value: checks.value.length },
+  { label: '待靠桥作业', value: checks.value.filter((item) => item.job.status === '待靠接').length },
+  { label: '机位核对不一致', value: checks.value.filter((item) => !item.consistent).length },
+])
 
-const rows = ref<EntryRow[]>([])
-const total = ref(0)
+const checks = ref<BridgeCheck[]>([])
+const standFilter = ref('')
 const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
-const statusSummary = computed(() =>
-  statuses.map((status: string) => ({
-    status,
-    count: rows.value.filter((row) => String(row.status) === status).length,
-  })),
-)
+
+const pendingJobs = computed(() => checks.value.filter((item) => item.job.status === '待靠接'))
 
 function resetFilters() {
-  filters.value = {}
+  standFilter.value = ''
   reload()
 }
 
@@ -109,7 +126,7 @@ function exportRows() {
 }
 
 function openCreate() {
-  errorMessage.value = '廊桥作业登记入口尚未接入审批流'
+  errorMessage.value = '廊桥作业由机位分配联动生成，暂不支持手工登记'
 }
 
 function runAction(action: string, row: EntryRow) {
@@ -124,13 +141,11 @@ function runAction(action: string, row: EntryRow) {
 
 function reload() {
   errorMessage.value = ''
-  try {
-    const payload = listEntries(meta.key, filters.value)
-    rows.value = payload.items
-    total.value = payload.total
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '廊桥靠接列表读取失败'
-  }
+  const list = listBridgeChecks()
+  const keyword = standFilter.value.trim()
+  checks.value = keyword
+    ? list.filter((item) => String(item.job['对应机位'] ?? '').includes(keyword))
+    : list
 }
 
 onMounted(reload)
